@@ -21,9 +21,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
     relib.addIncludePath(.{ .path = "lib" });
-    relib.addCSourceFile(.{
-        .file = b.path("lib/regex_slim.c")
-    });
+    relib.addCSourceFile(.{ .file = b.path("lib/regex_slim.c") });
     relib.linkLibC();
 
     const exe = b.addExecutable(.{
@@ -64,8 +62,6 @@ pub fn build(b: *std.Build) void {
     // This will evaluate the `run` step rather than the default, which is "install".
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
-
-
 
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.

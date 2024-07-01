@@ -55,13 +55,13 @@ pub fn find_proc(alloc: Allocator, inode: u32) ![]ProcPid {
         };
 
         if (c.regexec(regex_t, entry.path, 0, null, 0) == 0) {
-            const stat = proc_dir.statFile(entry.path) catch |err| switch(err) {
+            const stat = proc_dir.statFile(entry.path) catch |err| switch (err) {
                 error.AccessDenied => continue,
-                else => return err
+                else => return err,
             };
 
-            if(stat.kind == .unix_domain_socket) {
-                if(stat.inode == inode) {
+            if (stat.kind == .unix_domain_socket) {
+                if (stat.inode == inode) {
                     log.info("Found procpid path {s}", .{entry.path});
 
                     // <pid>/fd/<fd>
@@ -70,11 +70,7 @@ pub fn find_proc(alloc: Allocator, inode: u32) ![]ProcPid {
                     _ = compit.next().?.name; // skip /fd/
                     const fd = try std.fmt.parseInt(u32, compit.next().?.name, 10); // parse <fd>
 
-                    try buf.append(ProcPid{
-                        .pid = pid,
-                        .inode = inode,
-                        .fd = fd
-                    });
+                    try buf.append(ProcPid{ .pid = pid, .inode = inode, .fd = fd });
                 }
             }
         }
@@ -84,7 +80,7 @@ pub fn find_proc(alloc: Allocator, inode: u32) ![]ProcPid {
 }
 
 pub fn resolve_process(alloc: Allocator, proc_pid: ProcPid) !Process {
-    var fmt_buf = [_]u8{0}**20;
+    var fmt_buf = [_]u8{0} ** 20;
     const path = try std.fmt.bufPrint(&fmt_buf, "/proc/{d}", .{proc_pid.pid});
     const proc_dir = try std.fs.openDirAbsolute(path, .{});
 
@@ -100,14 +96,9 @@ pub fn resolve_process(alloc: Allocator, proc_pid: ProcPid) !Process {
 
     var cmdline_buf = std.ArrayList([]u8).init(arena_alloc.allocator());
     defer cmdline_buf.deinit();
-    while(cmdline_it.next()) |cmdline_elem| {
+    while (cmdline_it.next()) |cmdline_elem| {
         try cmdline_buf.append(try arena_alloc.allocator().dupe(u8, cmdline_elem));
     }
 
-    return Process{
-        .proc_pid = proc_pid,
-        .comm = comm,
-        .cmdline = try cmdline_buf.toOwnedSlice(),
-        .alloc = arena_alloc
-    };
+    return Process{ .proc_pid = proc_pid, .comm = comm, .cmdline = try cmdline_buf.toOwnedSlice(), .alloc = arena_alloc };
 }

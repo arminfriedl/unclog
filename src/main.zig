@@ -3,6 +3,7 @@ const proc = @import("procnet.zig");
 const pid = @import("procpid.zig");
 const c = @cImport({
     @cInclude("arpa/inet.h");
+    @cInclude("signal.h");
 });
 
 pub const std_options = .{
@@ -66,13 +67,21 @@ pub fn main() !void {
 
     if(!clogged){
         try std.io.getStdOut().writer().print("Port {d} looks unclogged already\n", .{port});
+    } else {
+        _ = try std.io.getStdOut().writer().write("Kill? ");
+        var buf: [10]u8 = undefined;
+        if(try std.io.getStdIn().reader().readUntilDelimiterOrEof(buf[0..], '\n')) |input| {
+            const killproc = try std.fmt.parseInt(usize, input, 10);
+            const process = procs.items[killproc-1];
+            _ = c.kill(@intCast(process.proc_pid.pid), c.SIGTERM);
+        }
     }
 }
 
 fn append_processes(alloc: std.mem.Allocator, inode: u32, buf: *std.ArrayList(pid.Process)) !void {
     const pids = try pid.find_proc(alloc, inode);
     defer alloc.free(pids);
-    try std.io.getStdOut().writer().print("\t{s: <10}{s: <20}{s}\n", .{"PID", "CMD", "ARGS"});
+    try std.io.getStdOut().writer().print("\t{s: <5}{s: <10}{s: <20}{s}\n", .{"#", "PID", "CMD", "ARGS"});
 
     for(pids) |p| {
         const process = try pid.resolve_process(alloc, p);
@@ -81,7 +90,7 @@ fn append_processes(alloc: std.mem.Allocator, inode: u32, buf: *std.ArrayList(pi
 
         const cmdline = try std.mem.join(alloc, " ", process.cmdline[1..]);
         defer alloc.free(cmdline);
-        try std.io.getStdOut().writer().print("\t{d: <10}{s: <20}{s}\n", .{process.proc_pid.pid, process.comm[0..process.comm.len-1], cmdline});
+        try std.io.getStdOut().writer().print("\t{d: <5}{d: <10}{s: <20}{s}\n", .{buf.items.len, process.proc_pid.pid, process.comm[0..process.comm.len-1], cmdline});
     }
     _ = try std.io.getStdOut().writer().write("\n");
 }

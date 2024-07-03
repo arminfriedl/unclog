@@ -33,6 +33,10 @@ pub const ProcNet = union(enum) {
     }
 };
 
+/// Read a protocol file in /proc/net
+///
+/// The memory of the resulting []ProcNet is caller owned and must be freed by
+/// the caller
 pub fn read_proc_net(alloc: Allocator, comptime addr_len: enum { V4, V6 }, path: []const u8) ![]ProcNet {
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();

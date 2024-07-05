@@ -77,6 +77,20 @@ pub fn build(b: *std.Build) void {
     const run_procnet_unit_tests = b.addRunArtifact(procnet_unit_tests);
     run_procnet_unit_tests.has_side_effects = true; // needed so tests aren't cached
 
+    // Creates a step for unit testing. This only builds the test executable
+    // but does not run it.
+    const process_unit_tests = b.addTest(.{
+        .root_source_file = b.path("src/process.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    process_unit_tests.addIncludePath(.{ .path = "lib" });
+    process_unit_tests.linkLibrary(relib);
+
+    const run_process_unit_tests = b.addRunArtifact(process_unit_tests);
+    run_process_unit_tests.has_side_effects = true; // needed so tests aren't cached
+
     const exe_unit_tests = b.addTest(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -92,5 +106,6 @@ pub fn build(b: *std.Build) void {
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_procnet_unit_tests.step);
+    test_step.dependOn(&run_process_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
 }

@@ -2,6 +2,7 @@ const std = @import("std");
 const proc = @import("procnet.zig");
 const pid = @import("procpid.zig");
 const clog = @import("proc.zig");
+const proces = @import("process.zig");
 const c = @cImport({
     @cInclude("arpa/inet.h");
     @cInclude("signal.h");

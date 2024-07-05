@@ -5,7 +5,7 @@
 
 const std = @import("std");
 
-// Socket that currently clogs a port with protocol information
+/// Socket that currently clogs a port with protocol information
 pub const ClogSocket = struct {
     port: u16,
     inode: std.posix.ino_t,
@@ -13,7 +13,7 @@ pub const ClogSocket = struct {
     protocol_data: ProtocolData,
 };
 
-// Known protocols
+/// Known protocols
 pub const Protocol = enum {
     udp_v4,
     udp_v6,
@@ -21,7 +21,7 @@ pub const Protocol = enum {
     tcp_v6,
 };
 
-// Protocol specific data
+/// Protocol specific data
 pub const ProtocolData = union(Protocol) {
     udp_v4: struct { addr: u32 },
     udp_v6: struct { addr: u128 },
@@ -29,14 +29,16 @@ pub const ProtocolData = union(Protocol) {
     tcp_v6: struct { addr: u128 },
 };
 
-// Parses `/proc/net` information into a flat list of ClogSockets.
-//
-// Memory is owned by caller. []ClogSocket must be freed by caller.
+/// Parses `/proc/net` information into a flat list of ClogSockets.
+///
+/// Memory is owned by caller. []ClogSocket must be freed by caller.
+///
+/// If proc_path is `null` will default to `/proc/net`
 pub fn parse(alloc: std.mem.Allocator, proc_path: ?[]u8) ![]ClogSocket {
+    const base = proc_path orelse "/proc/net";
+
     var buf = std.ArrayList(ClogSocket).init(alloc);
     defer buf.deinit(); // noop we re-own memory to parent at the end
-
-    const base = proc_path orelse "/proc/net";
 
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
@@ -133,6 +135,12 @@ fn parse_internal(path: []const u8, protocol: Protocol, buf: *std.ArrayList(Clog
 
 test "parse" {
     var alloc = std.testing.allocator;
-    const clogs = try parse(alloc, null);
-    alloc.free(clogs);
+
+    std.testing.log_level = .info;
+
+    const file_path = try std.fs.cwd().realpathAlloc(alloc, "./test/proc1");
+    defer alloc.free(file_path);
+
+    const clogs = try parse(alloc, file_path);
+    defer alloc.free(clogs);
 }

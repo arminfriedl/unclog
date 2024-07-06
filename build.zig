@@ -15,25 +15,13 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const relib = b.addStaticLibrary(.{
-        .name = "regex_slim",
-        .optimize = .Debug,
-        .target = target,
-    });
-    relib.addIncludePath(.{ .path = "lib" });
-    relib.addCSourceFile(.{ .file = b.path("lib/regex_slim.c") });
-    relib.linkLibC();
-
     const exe = b.addExecutable(.{
         .name = "unclog",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-        .link_libc = true,
     });
     exe.addIncludePath(.{ .path = "lib" });
-    exe.linkLibC();
-    exe.linkLibrary(relib);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -65,17 +53,15 @@ pub fn build(b: *std.Build) void {
 
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
-    const procnet_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/procnet.zig"),
+    const sockets_unit_tests = b.addTest(.{
+        .root_source_file = b.path("src/sockets.zig"),
         .target = target,
         .optimize = optimize,
-        .link_libc = true,
     });
-    procnet_unit_tests.addIncludePath(.{ .path = "lib" });
-    procnet_unit_tests.linkLibrary(relib);
+    sockets_unit_tests.addIncludePath(.{ .path = "lib" });
 
-    const run_procnet_unit_tests = b.addRunArtifact(procnet_unit_tests);
-    run_procnet_unit_tests.has_side_effects = true; // needed so tests aren't cached
+    const run_sockets_unit_tests = b.addRunArtifact(sockets_unit_tests);
+    run_sockets_unit_tests.has_side_effects = true; // needed so tests aren't cached
 
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
@@ -83,10 +69,8 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/process.zig"),
         .target = target,
         .optimize = optimize,
-        .link_libc = true,
     });
     process_unit_tests.addIncludePath(.{ .path = "lib" });
-    process_unit_tests.linkLibrary(relib);
 
     const run_process_unit_tests = b.addRunArtifact(process_unit_tests);
     run_process_unit_tests.has_side_effects = true; // needed so tests aren't cached
@@ -95,7 +79,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-        .link_libc = true,
     });
     exe_unit_tests.addIncludePath(.{ .path = "lib" });
 
@@ -105,7 +88,7 @@ pub fn build(b: *std.Build) void {
     // the `zig build --help` menu, providing a way for the user to request
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_procnet_unit_tests.step);
+    test_step.dependOn(&run_sockets_unit_tests.step);
     test_step.dependOn(&run_process_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
 }

@@ -2,6 +2,10 @@
 
 const std = @import("std");
 
+/// A simple array of clogging processes. Mainly a memory-owning wrapper for
+/// handling deallocation correctly. Call `deinit` to deallocate the memory.
+///
+/// Processes can be accessed via `.items`
 pub const Clogs = struct {
     items: []ClogProcess,
     alloc: std.mem.Allocator,
@@ -10,7 +14,7 @@ pub const Clogs = struct {
         try writer.print("{any}", .{value.items});
     }
 
-    fn deinit(self: @This()) void {
+    pub fn deinit(self: @This()) void {
         for (self.items) |item| {
             item.deinit();
         }
@@ -18,6 +22,7 @@ pub const Clogs = struct {
     }
 };
 
+/// Process metadata of a clogging process
 pub const ClogProcess = struct {
     // central data
     pid: std.posix.pid_t,
@@ -49,24 +54,29 @@ pub const ClogProcess = struct {
     }
 };
 
-pub fn find_by_inode(alloc: std.mem.Allocator, inode: std.posix.ino_t, proc_path: ?[]u8) !Clogs {
+/// Find clogging processes that hold a file handle on an inode
+pub fn find_by_inode(alloc: std.mem.Allocator, inode: std.posix.ino_t, proc_path: ?[]const u8) !Clogs {
     const base = proc_path orelse "/proc";
 
     var clogs = std.ArrayList(ClogProcess).init(alloc);
-    defer clogs.deinit(); // noop we re-own memory to parent at the end
+    defer clogs.deinit(); // noop we re-own memory at the end
 
-    const proc_dir = try std.fs.openDirAbsolute(base, .{ .iterate = true });
+    var proc_dir = try std.fs.openDirAbsolute(base, .{ .iterate = true });
+    defer proc_dir.close();
 
     var process_it = PidIterator{ .it = AccessSafeIterator{ .it = proc_dir.iterate() } };
     while (try process_it.next()) |process_entry| {
-        const process_dir = proc_dir.openDir(process_entry.name, .{ .iterate = true }) catch |err| switch (err) {
+        var process_dir = proc_dir.openDir(process_entry.name, .{ .iterate = true }) catch |err| switch (err) {
             error.AccessDenied => continue,
             else => return err,
         };
-        const fd_dir = process_dir.openDir("fd", .{ .iterate = true }) catch |err| switch (err) {
+        defer process_dir.close();
+
+        var fd_dir = process_dir.openDir("fd", .{ .iterate = true }) catch |err| switch (err) {
             error.AccessDenied => continue,
             else => return err,
         };
+        defer fd_dir.close();
 
         var fd_it = FdIterator{ .it = AccessSafeIterator{ .it = fd_dir.iterate() } };
         fdit: while (try fd_it.next()) |fd_entry| {
@@ -87,39 +97,15 @@ pub fn find_by_inode(alloc: std.mem.Allocator, inode: std.posix.ino_t, proc_path
                     }
                 }
 
-                var comm_file = process_dir.openFile("comm", .{}) catch |err| switch (err) {
-                    error.AccessDenied => continue,
-                    else => return err,
-                };
-                var cmdline_file = process_dir.openFile("cmdline", .{}) catch |err| switch (err) {
-                    error.AccessDenied => continue,
-                    else => return err,
-                };
-
-                var exe_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                const exe_path = process_dir.readLink("exe", &exe_path_buf) catch |err| switch (err) {
-                    error.AccessDenied => continue,
-                    else => return err,
-                };
-
-                const comm = try comm_file.readToEndAlloc(alloc, 4096);
-                defer alloc.free(comm);
-
-                var cmdline = std.ArrayList([]u8).init(alloc);
-                const cmdline_raw = try cmdline_file.readToEndAlloc(alloc, 4096);
-                defer alloc.free(cmdline_raw);
-                var cmdline_it = std.mem.splitScalar(u8, cmdline_raw, 0x0);
-                while (cmdline_it.next()) |cl| {
-                    try cmdline.append(try alloc.dupe(u8, std.mem.trim(u8, cl, "\n")));
-                }
+                const pfd: ProcessFileData = try parse_process_files(alloc, &process_dir) orelse continue;
 
                 try clogs.append(ClogProcess{
                     .pid = pid,
                     .inode = fd_stat.inode,
                     .fd = try std.fmt.parseInt(std.posix.pid_t, fd_entry.name, 10),
-                    .comm = try alloc.dupe(u8, std.mem.trim(u8, comm, "\n")),
-                    .cmdline = try cmdline.toOwnedSlice(),
-                    .exe = try alloc.dupe(u8, exe_path),
+                    .comm = pfd.comm,
+                    .cmdline = pfd.cmdline,
+                    .exe = pfd.exe,
                     .alloc = alloc,
                 });
             }
@@ -127,6 +113,46 @@ pub fn find_by_inode(alloc: std.mem.Allocator, inode: std.posix.ino_t, proc_path
     }
 
     return Clogs{ .items = try clogs.toOwnedSlice(), .alloc = alloc };
+}
+
+const ProcessFileData = struct {
+    comm: []u8,
+    cmdline: [][]u8,
+    exe: []u8,
+};
+
+fn parse_process_files(alloc: std.mem.Allocator, process_dir: *const std.fs.Dir) !?ProcessFileData {
+    var comm_file = process_dir.openFile("comm", .{}) catch |err| switch (err) {
+        error.AccessDenied => return null,
+        else => return err,
+    };
+    var cmdline_file = process_dir.openFile("cmdline", .{}) catch |err| switch (err) {
+        error.AccessDenied => return null,
+        else => return err,
+    };
+
+    var exe_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const exe_path = process_dir.readLink("exe", &exe_path_buf) catch |err| switch (err) {
+        error.AccessDenied => return null,
+        else => return err,
+    };
+
+    const comm = try comm_file.readToEndAlloc(alloc, 4096);
+    defer alloc.free(comm);
+
+    var cmdline = std.ArrayList([]u8).init(alloc);
+    const cmdline_raw = try cmdline_file.readToEndAlloc(alloc, 4096);
+    defer alloc.free(cmdline_raw);
+    var cmdline_it = std.mem.splitScalar(u8, cmdline_raw, 0x0);
+    while (cmdline_it.next()) |cl| {
+        try cmdline.append(try alloc.dupe(u8, std.mem.trim(u8, cl, "\n")));
+    }
+
+    return .{
+        .comm = try alloc.dupe(u8, std.mem.trim(u8, comm, "\n")),
+        .cmdline = try cmdline.toOwnedSlice(),
+        .exe = try alloc.dupe(u8, exe_path),
+    };
 }
 
 const FdIterator = struct {
@@ -178,7 +204,7 @@ const AccessSafeIterator = struct {
 test "simple" {
     std.testing.log_level = .info;
 
-    const clogs = try find_by_inode(std.testing.allocator, 3568, null);
+    const clogs = try find_by_inode(std.testing.allocator, 721, null);
     defer clogs.deinit();
     std.log.info("clogs: {any}", .{clogs});
 }

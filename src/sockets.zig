@@ -124,13 +124,36 @@ fn parse_internal(path: []const u8, protocol: Protocol, buf: *std.ArrayList(Clog
             .uid = try std.fmt.parseInt(std.posix.uid_t, uid, 10),
             .protocol_data = switch (protocol) {
                 .tcp_v4 => .{ .tcp_v4 = .{ .addr = try std.fmt.parseInt(u32, local_address[0..8], 16) } },
-                .tcp_v6 => .{ .tcp_v6 = .{ .addr = try std.fmt.parseInt(u128, local_address[0..32], 16) } },
+                .tcp_v6 => .{ .tcp_v6 = .{ .addr = try parse_v6_address(local_address[0..32]) } },
 
                 .udp_v4 => .{ .udp_v4 = .{ .addr = try std.fmt.parseInt(u32, local_address[0..8], 16) } },
-                .udp_v6 => .{ .udp_v6 = .{ .addr = try std.fmt.parseInt(u128, local_address[0..32], 16) } },
+                .udp_v6 => .{ .udp_v6 = .{ .addr = try parse_v6_address(local_address[0..32]) } },
             },
         });
     }
+}
+
+// v6 addresses in /proc/net are not actually one big number, but an array of 4
+// 32-bit (4 byte) numbers, each in base-16 little-endian (or just host byte order
+// probably)
+fn parse_v6_address(data: []const u8) !u128 {
+    var buf: [4]u32 = undefined;
+
+    buf[0] = try std.fmt.parseInt(u32, data[0..8], 16);
+    buf[1] = try std.fmt.parseInt(u32, data[8..16], 16);
+    buf[2] = try std.fmt.parseInt(u32, data[16..24], 16);
+    buf[3] = try std.fmt.parseInt(u32, data[24..32], 16);
+
+    // now do the fun stuff, just re-interpret the array as u128
+    return std.mem.bytesToValue(u128, &buf);
+}
+
+test "parse_v6" {
+    std.testing.log_level = .info;
+
+    const data = "00000000000000000000000001000000";
+    const r = try parse_v6_address(data);
+    std.log.info("Got {d}", .{r});
 }
 
 test "parse" {

@@ -20,8 +20,8 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
-    exe.addIncludePath(.{ .path = "lib" });
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -58,7 +58,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    sockets_unit_tests.addIncludePath(.{ .path = "lib" });
 
     const run_sockets_unit_tests = b.addRunArtifact(sockets_unit_tests);
     run_sockets_unit_tests.has_side_effects = true; // needed so tests aren't cached
@@ -70,7 +69,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    process_unit_tests.addIncludePath(.{ .path = "lib" });
 
     const run_process_unit_tests = b.addRunArtifact(process_unit_tests);
     run_process_unit_tests.has_side_effects = true; // needed so tests aren't cached
@@ -79,8 +77,8 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
-    exe_unit_tests.addIncludePath(.{ .path = "lib" });
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 

@@ -37,7 +37,7 @@ fn kill(pids: []const std.posix.pid_t) void {
     for (pids) |pid| {
         if (c.kill(pid, c.SIGTERM) == 0) {
             // Wait briefly for process to exit
-            std.time.sleep(100000000); // 100ms
+            std.time.sleep(500000000000); // ns = 5s
 
             // Check if process still exists
             if (c.kill(pid, 0) == 0) {

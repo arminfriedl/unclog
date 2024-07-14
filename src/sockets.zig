@@ -11,6 +11,15 @@ pub const ClogSocket = struct {
     inode: std.posix.ino_t,
     uid: std.posix.uid_t,
     protocol_data: ProtocolData,
+
+    pub fn clone(self: @This()) ClogSocket {
+        return ClogSocket {
+            .port = self.port,
+            .inode = self.inode,
+            .uid = self.uid,
+            .protocol_data = self.protocol_data
+        };
+    }
 };
 
 /// Known protocols

@@ -6,12 +6,24 @@ const std = @import("std");
 /// handling deallocation correctly. Call `deinit` to deallocate the memory.
 ///
 /// Processes can be accessed via `.items`
-pub const Clogs = struct {
+pub const ClogProcesses = struct {
     items: []ClogProcess,
     alloc: std.mem.Allocator,
 
     pub fn format(value: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try writer.print("{any}", .{value.items});
+    }
+
+    pub fn clone(self: @This(), alloc: std.mem.Allocator) !ClogProcesses {
+        var items = try alloc.alloc(ClogProcess, self.items.len);
+        for(self.items, 0..) |item, idx| {
+            items[idx] = try item.clone(alloc);
+        }
+
+        return ClogProcesses {
+            .items = items,
+            .alloc = alloc
+        };
     }
 
     pub fn deinit(self: @This()) void {
@@ -44,6 +56,24 @@ pub const ClogProcess = struct {
         try writer.writeAll("}");
     }
 
+    pub fn clone(self: @This(), alloc: std.mem.Allocator) !ClogProcess {
+        var cmdline: [][]u8 = try alloc.alloc([]u8, self.cmdline.len);
+        for(self.cmdline, 0..) |line, idx| {
+            cmdline[idx] = try alloc.dupe(u8, line);
+        }
+
+        return ClogProcess {
+            .pid = self.pid,
+            .inode = self.inode,
+            .fd = self.fd,
+            .comm = try alloc.dupe(u8, self.comm),
+            .exe = try alloc.dupe(u8, self.exe),
+            .cmdline = cmdline,
+
+            .alloc = alloc
+        };
+    }
+
     fn deinit(self: @This()) void {
         self.alloc.free(self.comm);
         self.alloc.free(self.exe);
@@ -55,7 +85,7 @@ pub const ClogProcess = struct {
 };
 
 /// Find clogging processes that hold a file handle on an inode
-pub fn find_by_inode(alloc: std.mem.Allocator, inode: std.posix.ino_t, proc_path: ?[]const u8) !Clogs {
+pub fn find_by_inode(alloc: std.mem.Allocator, inode: std.posix.ino_t, proc_path: ?[]const u8) !ClogProcesses {
     const base = proc_path orelse "/proc";
 
     var clogs = std.ArrayList(ClogProcess).init(alloc);
@@ -112,7 +142,7 @@ pub fn find_by_inode(alloc: std.mem.Allocator, inode: std.posix.ino_t, proc_path
         }
     }
 
-    return Clogs{ .items = try clogs.toOwnedSlice(), .alloc = alloc };
+    return ClogProcesses{ .items = try clogs.toOwnedSlice(), .alloc = alloc };
 }
 
 const ProcessFileData = struct {

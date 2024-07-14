@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const sockets = @import("sockets.zig");
 const process = @import("process.zig");
+const match = @import("match.zig");
 const c = @cImport({
     @cInclude("pwd.h");
     @cInclude("arpa/inet.h");
@@ -26,16 +27,19 @@ pub fn main() !u8 {
     };
     defer alloc.free(ports);
 
-    const pids = try print_clogs(alloc, ports);
-    defer alloc.free(pids);
+    const clogs = try match.match(alloc, ports);
+    defer clogs.deinit();
 
-    if (pids.len == 0) {
+    if (clogs.items.len == 0) {
+        try std.io.getStdOut().writeAll("Ports look unclogged\n");
         return 0;
     }
 
+    try print_clogs(clogs);
+
     var kills: []u16 = undefined;
     while(true) {
-        kills = choose_kill(alloc, pids.len) catch |err| {
+        kills = choose_kill(alloc, clogs.items.len) catch |err| {
             if (builtin.mode == std.builtin.Mode.Debug) {
                 try kill_usage();
                 return err;
@@ -49,7 +53,16 @@ pub fn main() !u8 {
     defer alloc.free(kills);
 
     for(kills) |k| {
-        kill(pids[k-1]);
+        // go find the kill
+        var procnum: usize = 0;
+        for(clogs.items) |clog| {
+            if(clog.procs.items.len < (k-procnum)) { // kill is in a process in the next clog
+                procnum += clog.procs.items.len;
+            } else { // kill is in this clog - the # of clog process we passed
+                kill(clog.procs.items[k-procnum-1].pid);
+                break;
+            }
+        }
     }
 
     return 0;
@@ -125,85 +138,60 @@ fn choose_kill(alloc: std.mem.Allocator, choices: usize) ![]u16 {
     return kills;
 }
 
-fn print_clogs(alloc: std.mem.Allocator, ports: []u16) ![]std.posix.pid_t {
+fn print_clogs(clogs: match.Clogs) !void {
     var writer = std.io.getStdOut().writer();
-    var pids = std.ArrayList(std.posix.pid_t).init(alloc);
-    defer pids.deinit(); // noop after re-owning memory at end
-
-    const clog_sockets = try sockets.parse(alloc, null);
-    defer alloc.free(clog_sockets);
-
-    var any: bool = false;
-    for (clog_sockets) |cs| {
-        if(std.mem.indexOfScalar(u16, ports, cs.port)) |_| {
-            any = true;
-        }
-    }
-
-    if (!any) {
-        try writer.writeAll("Ports look unclogged\n");
-        return &[_]std.posix.pid_t{};
-    }
 
     try writer.print("{s: <3}{s: <10} {s: <30} {s: <12} {s: <15} {s: <10} {s: <6} {s: <5}\n", .{ "#", "Command", "Path", "Protocol", "Address", "User", "Inode", "Port" });
     var idx: usize = 1;
 
-    for (clog_sockets) |cs| {
-        if (std.mem.indexOfScalar(u16, ports, cs.port)) |_| {
-            const clogs = try process.find_by_inode(alloc, cs.inode, null);
-            defer clogs.deinit();
+    for (clogs.items) |clog| {
+        const user = c.getpwuid(clog.sock.uid);
 
-            const user = c.getpwuid(cs.uid);
-
-            for (clogs.items) |clog| {
-                switch (cs.protocol_data) {
-                    // zig fmt: off
-                    .tcp_v4 => |proto| {
-                        var addr: [c.INET_ADDRSTRLEN:0]u8 = undefined;
-                        _ = c.inet_ntop(c.AF_INET, &proto.addr, &addr, c.INET_ADDRSTRLEN);
-                        try writer.print("{d: <3}{s: <10} {s: <30} {s: <12} {s: <15} {s: <10} {d: <6} {d: <5}\n", .{
-                            idx,
-                            clog.comm[0..@min(10, clog.comm.len)], clog.exe[0..@min(30, clog.exe.len)],
-                            "TCP/IPv4", std.mem.sliceTo(&addr, 0),
-                            user.*.pw_name, cs.inode, cs.port });
-                    },
-                    .tcp_v6 => |proto| {
-                        var addr: [c.INET6_ADDRSTRLEN:0]u8 = undefined;
-                        _ = c.inet_ntop(c.AF_INET6, &proto.addr, &addr, c.INET6_ADDRSTRLEN);
-                        try writer.print("{d: <3}{s: <10} {s: <30} {s: <12} {s: <15} {s: <10} {d: <6} {d: <5}\n", .{
-                            idx,
-                            clog.comm[0..@min(10, clog.comm.len)], clog.exe[0..@min(30, clog.exe.len)],
-                            "TCP/IPv6", std.mem.sliceTo(&addr, 0),
-                            user.*.pw_name, cs.inode, cs.port });
-                    },
-                    .udp_v4 => |proto| {
-                        var addr: [c.INET_ADDRSTRLEN:0]u8 = undefined;
-                        _ = c.inet_ntop(c.AF_INET, &proto.addr, &addr, c.INET_ADDRSTRLEN);
-                        try writer.print("{d: <3}{s: <10} {s: <30} {s: <12} {s: <15} {s: <10} {d: <6} {d: <5}\n", .{
-                            idx,
-                            clog.comm[0..@min(10, clog.comm.len)], clog.exe[0..@min(30, clog.exe.len)],
-                            "UDP/IPv4", std.mem.sliceTo(&addr, 0),
-                            user.*.pw_name, cs.inode, cs.port });
-                    },
-                    .udp_v6 => |proto| {
-                        var addr: [c.INET6_ADDRSTRLEN:0]u8 = undefined;
-                        _ = c.inet_ntop(c.AF_INET6, &proto.addr, &addr, c.INET6_ADDRSTRLEN);
-                        try writer.print("{d: <3}{s: <10} {s: <30} {s: <12} {s: <15} {s: <10} {d: <6} {d: <5}\n", .{
-                            idx,
-                            clog.comm[0..@min(10, clog.comm.len)], clog.exe[0..@min(30, clog.exe.len)],
-                            "UDP/IPv6", std.mem.sliceTo(&addr, 0),
-                            user.*.pw_name, cs.inode, cs.port });
-                    },
-                    // zig fmt: on
-                }
-
-                try pids.append(clog.pid);
-                idx += 1;
+        for (clog.procs.items) |proc| {
+            switch (clog.sock.protocol_data) {
+                // zig fmt: off
+                .tcp_v4 => |proto| {
+                    var addr: [c.INET_ADDRSTRLEN:0]u8 = undefined;
+                    _ = c.inet_ntop(c.AF_INET, &proto.addr, &addr, c.INET_ADDRSTRLEN);
+                    try writer.print("{d: <3}{s: <10} {s: <30} {s: <12} {s: <15} {s: <10} {d: <6} {d: <5}\n", .{
+                        idx,
+                        proc.comm[0..@min(10, proc.comm.len)], proc.exe[0..@min(30, proc.exe.len)],
+                        "TCP/IPv4", std.mem.sliceTo(&addr, 0),
+                        user.*.pw_name, clog.sock.inode, clog.port });
+                },
+                .tcp_v6 => |proto| {
+                    var addr: [c.INET6_ADDRSTRLEN:0]u8 = undefined;
+                    _ = c.inet_ntop(c.AF_INET6, &proto.addr, &addr, c.INET6_ADDRSTRLEN);
+                    try writer.print("{d: <3}{s: <10} {s: <30} {s: <12} {s: <15} {s: <10} {d: <6} {d: <5}\n", .{
+                        idx,
+                        proc.comm[0..@min(10, proc.comm.len)], proc.exe[0..@min(30, proc.exe.len)],
+                        "TCP/IPv6", std.mem.sliceTo(&addr, 0),
+                        user.*.pw_name, clog.sock.inode, clog.port });
+                },
+                .udp_v4 => |proto| {
+                    var addr: [c.INET_ADDRSTRLEN:0]u8 = undefined;
+                    _ = c.inet_ntop(c.AF_INET, &proto.addr, &addr, c.INET_ADDRSTRLEN);
+                    try writer.print("{d: <3}{s: <10} {s: <30} {s: <12} {s: <15} {s: <10} {d: <6} {d: <5}\n", .{
+                        idx,
+                        proc.comm[0..@min(10, proc.comm.len)], proc.exe[0..@min(30, proc.exe.len)],
+                        "UDP/IPv4", std.mem.sliceTo(&addr, 0),
+                        user.*.pw_name, clog.sock.inode, clog.port });
+                },
+                .udp_v6 => |proto| {
+                    var addr: [c.INET6_ADDRSTRLEN:0]u8 = undefined;
+                    _ = c.inet_ntop(c.AF_INET6, &proto.addr, &addr, c.INET6_ADDRSTRLEN);
+                    try writer.print("{d: <3}{s: <10} {s: <30} {s: <12} {s: <15} {s: <10} {d: <6} {d: <5}\n", .{
+                        idx,
+                        proc.comm[0..@min(10, proc.comm.len)], proc.exe[0..@min(30, proc.exe.len)],
+                        "UDP/IPv6", std.mem.sliceTo(&addr, 0),
+                        user.*.pw_name, clog.sock.inode, clog.port });
+                },
+                // zig fmt: on
             }
+
+            idx += 1;
         }
     }
-
-    return pids.toOwnedSlice();
 }
 
 fn usage() !void {

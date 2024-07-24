@@ -58,10 +58,43 @@ pub fn parse(alloc: std.mem.Allocator, proc_path: ?[]u8) ![]ClogSocket {
     const udp_v4_path = try std.fs.path.join(child_alloc, &[_][]const u8{ base, "udp" });
     const udp_v6_path = try std.fs.path.join(child_alloc, &[_][]const u8{ base, "udp6" });
 
-    try parse_internal(tcp_v4_path, .tcp_v4, &buf);
-    try parse_internal(tcp_v6_path, .tcp_v6, &buf);
-    try parse_internal(udp_v4_path, .udp_v4, &buf);
-    try parse_internal(udp_v6_path, .udp_v6, &buf);
+    parse_internal(tcp_v4_path, .tcp_v4, &buf) catch |err| {
+        switch(err) {
+            error.FileNotFound => {
+                std.log.warn("{s} not found, skipping", .{tcp_v4_path});
+            },
+            else => return err
+        }
+    };
+
+    parse_internal(tcp_v6_path, .tcp_v6, &buf) catch |err| {
+        switch(err) {
+            error.FileNotFound => {
+                std.log.warn("{s} not found, skipping", .{tcp_v6_path});
+            },
+            else => return err
+
+        }
+    };
+
+    parse_internal(udp_v4_path, .udp_v4, &buf) catch |err| {
+        switch(err) {
+            error.FileNotFound => {
+                std.log.warn("{s} not found, skipping", .{udp_v4_path});
+            },
+            else => return err
+
+        }
+    };
+
+    parse_internal(udp_v6_path, .udp_v6, &buf) catch |err| {
+        switch(err) {
+            error.FileNotFound => {
+                std.log.warn("{s} not found, skipping", .{udp_v6_path});
+            },
+            else => return err
+        }
+    };
 
     return buf.toOwnedSlice();
 }
